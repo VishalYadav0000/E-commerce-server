@@ -1,40 +1,68 @@
-const User = require("../models/userModel");
-const generateToken = require("../utils/generateToken");
+const User = require("../models/User");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
-const registerUser = async (req, res) => {
+// JWT secret (ideally env file se lo)
+const JWT_SECRET = process.env.JWT_SECRET;
+
+
+exports.register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({ message: "User already exists" });
+    const { name, email, phone, password } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ error: "Email already in use" });
     }
 
-    const user = await User.create({ name, email, password });
-    if (user) {
-      generateToken(res, user._id);
-      res.status(201).json({ _id: user._id, name: user.name, email: user.email });
-    } else {
-      res.status(400).json({ message: "Invalid user data" });
-    }
-  } catch (error) {
-    res.status(500).json({ message: "Server error" });
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create user
+    const user = await User.create({
+      name,
+      email,
+      phone,
+      password: hashedPassword,
+    });
+
+    // Generate JWT
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, {
+      expiresIn: "7d",
+    });
+
+    res.status(201).json({ token, user: { name: user.name, email: user.email } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
   }
 };
 
-const loginUser = async (req, res) => {
+exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { phone, password } = req.body;
 
-    const user = await User.findOne({ email });
-    if (user && (await user.matchPassword(password))) {
-      generateToken(res, user._id);
-      res.json({ _id: user._id, name: user.name, email: user.email });
-    } else {
-      res.status(401).json({ message: "Invalid email or password" });
+    // Find user
+    const user = await User.findOne({ phone });
+    if (!user) {
+      return res.status(400).json({ error: "Invalid phone or password" });
     }
-  } catch (error) {
-    res.status(500).json({ message: "Server error" });
+
+    // Compare password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: "Invalid phone or password" });
+    }
+
+    // Generate JWT
+    const token = jwt.sign({ id: user._id }, JWT_SECRET, {
+      expiresIn: "7d",
+    });
+
+    res.status(200).json({ token, user: { name: user.name, email: user.email } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
   }
 };
-
-module.exports = { registerUser, loginUser };
